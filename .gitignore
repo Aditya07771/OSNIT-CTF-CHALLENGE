@@ -1,3 +1,8 @@
 node_modules
 dist
 .vercel
+
+# Real flags live here. Never commit these.
+.env
+.env.local
+.env.*.local

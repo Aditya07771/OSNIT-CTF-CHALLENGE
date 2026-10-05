@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
 import { challenges } from "./challenges.js";
-import { hashAnswer } from "./hash.js";
 
 const STORE_KEY = "ltcoe-osint-solved";
+
+async function verify(id, answer) {
+  const res = await fetch("/api/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, answer }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
 
 function loadSolved() {
   try {
@@ -22,22 +31,39 @@ function saveSolved(list) {
 
 function Case({ index, c, solved, onSolve }) {
   const [value, setValue] = useState("");
-  const [status, setStatus] = useState(null); // null | "wrong" | "unset" | "busy"
+  // null | "wrong" | "unset" | "limited" | "error" | "busy"
+  const [status, setStatus] = useState(null);
 
   async function submit(e) {
     e.preventDefault();
     if (!value.trim()) return;
-    if (!c.hash) {
-      setStatus("unset");
+    setStatus("busy");
+
+    let result;
+    try {
+      result = await verify(c.id, value);
+    } catch {
+      setStatus("error");
       return;
     }
-    setStatus("busy");
-    const h = await hashAnswer(c.id, value, { stripSpaces: c.stripSpaces });
-    if (h === c.hash) {
+
+    if (result.data.ok) {
       setStatus(null);
       onSolve(c.id);
-    } else {
-      setStatus("wrong");
+      return;
+    }
+
+    switch (result.data.reason) {
+      case "unset":
+        setStatus("unset");
+        break;
+      case "rate_limited":
+        setStatus("limited");
+        break;
+      default:
+        // "wrong" plus any unrecognised reason: treat as a plain miss rather
+        // than leaking which reason occurred.
+        setStatus("wrong");
     }
   }
 
@@ -94,10 +120,15 @@ function Case({ index, c, solved, onSolve }) {
               {solved ? "Solved" : "Check answer"}
             </button>
           </div>
-          <p className={`result ${solved ? "ok" : status === "wrong" || status === "unset" ? "bad" : ""}`} role="status">
+          <p
+            className={`result ${solved ? "ok" : status === "wrong" || status === "unset" || status === "limited" || status === "error" ? "bad" : ""}`}
+            role="status"
+          >
             {solved && "Correct. This one is done."}
             {status === "wrong" && "Not the right answer. Check the format and try again."}
             {status === "unset" && "The answer for this challenge hasn't been set up yet. Tell the organizers."}
+            {status === "limited" && "Too many attempts just now. Wait a minute and try again."}
+            {status === "error" && "Couldn't reach the answer checker. Try again in a moment."}
           </p>
         </form>
       </div>
