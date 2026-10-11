@@ -12,7 +12,7 @@ export const challenges = [
     id: "q1",
     title: "Stand where the camera stood",
     kind: "Geolocation",
-    format: "flag{Latitude,Longitude}",
+    format: "LTCOE{Latitude,Longitude}",
     brief:
       "Find the exact spot this photo was taken from. Give the coordinates with only 4 digits after the decimal point, cut off rather than rounded (112.12345 becomes 112.1234).",
     images: [{ src: "/case1.png", alt: "Street scene beside a river with a cable-stayed bridge in the distance" }],
