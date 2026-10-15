@@ -121,18 +121,19 @@ with (security_invoker = false)
 as
 select
   row_number() over (
-    order by sum(cs.points_awarded) desc,
+    order by coalesce(sum(cs.points_awarded), 0) desc,
              count(cs.challenge_id)  desc,
-             min(cs.solved_at)       asc
-  )::int                         as rank,
-  p.id                           as user_id,
-  p.display_name                 as display_name,
-  sum(cs.points_awarded)::int    as total_points,
-  count(cs.challenge_id)::int    as challenges_solved,
-  min(cs.solved_at)              as first_solve_at
+             min(cs.solved_at)       asc nulls last,
+             p.created_at            asc
+  )::int                                      as rank,
+  p.id                                        as user_id,
+  p.display_name                              as display_name,
+  coalesce(sum(cs.points_awarded), 0)::int    as total_points,
+  count(cs.challenge_id)::int                 as challenges_solved,
+  min(cs.solved_at)                           as first_solve_at
 from public.profiles p
-join public.challenge_solves cs on cs.user_id = p.id
-group by p.id, p.display_name;
+left join public.challenge_solves cs on cs.user_id = p.id
+group by p.id, p.display_name, p.created_at;
 
 -- ---------- 6. Grants ----------
 

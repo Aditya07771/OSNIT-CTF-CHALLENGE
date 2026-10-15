@@ -49,16 +49,16 @@ export function Profile({ onClose }) {
       setDisplayName(defaultName)
     }
 
-    // Load solves from Supabase, or fall back to local solves
+    // Load solves from Supabase, or fall back to /api/solves
     let solveList = []
     try {
-      const { data: solveData } = await supabase
+      const { data: solveData, error: dbErr } = await supabase
         .from('challenge_solves')
         .select('*')
         .eq('user_id', user.id)
         .order('solved_at', { ascending: false })
 
-      if (solveData && solveData.length > 0) {
+      if (!dbErr && solveData && solveData.length > 0) {
         solveList = solveData
       }
     } catch {
@@ -67,20 +67,23 @@ export function Profile({ onClose }) {
 
     if (solveList.length === 0) {
       try {
-        const localSolvedIds = JSON.parse(localStorage.getItem('ltcoe_solved') || '[]')
-        solveList = localSolvedIds.map((id) => ({
-          id,
-          challenge_id: id,
-          points_awarded: POINTS_MAP[id] || 0,
-          solved_at: new Date().toISOString(),
-        }))
+        const { data: { session } } = await supabase.auth.getSession()
+        const token = session?.access_token
+        const headers = token ? { Authorization: `Bearer ${token}` } : {}
+        const res = await fetch(`/api/solves?userId=${encodeURIComponent(user.id)}`, { headers })
+        if (res.ok) {
+          const body = await res.json()
+          if (Array.isArray(body?.solves) && body.solves.length > 0) {
+            solveList = body.solves
+          }
+        }
       } catch {}
     }
 
     setSolves(solveList)
 
     // Calculate stats
-    const points = solveList.reduce((sum, s) => sum + s.points_awarded, 0)
+    const points = solveList.reduce((sum, s) => sum + (Number(s.points_awarded) || POINTS_MAP[s.challenge_id] || 0), 0)
     setTotalPoints(points)
     setChallengesSolved(solveList.length)
 
@@ -92,7 +95,7 @@ export function Profile({ onClose }) {
         const myEntry = lb.find(
           (e) =>
             e.user_id === user.id ||
-            e.display_name === (displayName || defaultName)
+            e.display_name?.toLowerCase() === (displayName || defaultName).toLowerCase()
         )
         if (myEntry) setRank(myEntry.rank)
       }
@@ -139,6 +142,10 @@ export function Profile({ onClose }) {
 
   async function handleLogout() {
     await supabase.auth.signOut()
+    localStorage.removeItem('ltcoe_user_id')
+    localStorage.removeItem('ltcoe_display_name')
+    localStorage.removeItem('ltcoe_solved')
+    localStorage.removeItem('ltcoe_guest_solved')
     onClose()
   }
 

@@ -35,12 +35,17 @@ function localApiPlugin() {
           req.body = raw;
 
           try {
-            const urlPath = req.url.split("?")[0];
+            const parsedUrl = new URL(req.url, "http://localhost");
+            req.query = Object.fromEntries(parsedUrl.searchParams.entries());
+
+            const urlPath = parsedUrl.pathname;
             let handlerMod = null;
             if (urlPath === "/api/verify" || urlPath === "/api/verify.js") {
               handlerMod = await server.ssrLoadModule("/api/verify.js");
             } else if (urlPath === "/api/leaderboard" || urlPath === "/api/leaderboard.js") {
               handlerMod = await server.ssrLoadModule("/api/leaderboard.js");
+            } else if (urlPath === "/api/solves" || urlPath === "/api/solves.js") {
+              handlerMod = await server.ssrLoadModule("/api/solves.js");
             } else {
               return next();
             }

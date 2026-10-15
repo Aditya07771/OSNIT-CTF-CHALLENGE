@@ -210,7 +210,6 @@ function ChallengesPage({ user, solved, markSolved, onShowAuth }) {
       </main>
       <footer className="wrap foot">
         <p>Flags are case-insensitive. Spaces around the answer are ignored.</p>
-        <br></br>
         <p>Author by : Aditya Nishad</p>
       </footer>
     </>
@@ -219,14 +218,7 @@ function ChallengesPage({ user, solved, markSolved, onShowAuth }) {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [solved, setSolved] = useState(() => {
-    try {
-      const saved = localStorage.getItem("ltcoe_solved");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [solved, setSolved] = useState([]);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [showProfile, setShowProfile] = useState(false);
@@ -238,22 +230,36 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        const name = session.user.user_metadata?.display_name || session.user.email?.split("@")[0];
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) {
+        const name = currentUser.user_metadata?.display_name || currentUser.email?.split("@")[0];
         if (name) localStorage.setItem("ltcoe_display_name", name);
-        localStorage.setItem("ltcoe_user_id", session.user.id);
-        loadUserData(session.user);
+        localStorage.setItem("ltcoe_user_id", currentUser.id);
+        loadUserData(currentUser);
+      } else {
+        try {
+          const guestSolved = localStorage.getItem("ltcoe_guest_solved");
+          setSolved(guestSolved ? JSON.parse(guestSolved) : []);
+        } catch {
+          setSolved([]);
+        }
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        const name = session.user.user_metadata?.display_name || session.user.email?.split("@")[0];
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) {
+        const name = currentUser.user_metadata?.display_name || currentUser.email?.split("@")[0];
         if (name) localStorage.setItem("ltcoe_display_name", name);
-        localStorage.setItem("ltcoe_user_id", session.user.id);
-        loadUserData(session.user);
+        localStorage.setItem("ltcoe_user_id", currentUser.id);
+        await loadUserData(currentUser);
+      } else {
+        localStorage.removeItem("ltcoe_display_name");
+        localStorage.removeItem("ltcoe_user_id");
+        localStorage.removeItem("ltcoe_solved");
+        setSolved([]);
       }
     });
 
@@ -261,37 +267,78 @@ export default function App() {
   }, []);
 
   async function loadUserData(currentUser) {
+    if (!currentUser?.id) {
+      setSolved([]);
+      return;
+    }
+
+    const userKey = `ltcoe_solved_${currentUser.id}`;
+
+    // 1. Try fetching solves directly from Supabase
     try {
-      const { data: solves, error } = await supabase
+      const { data: dbSolves, error: dbError } = await supabase
         .from('challenge_solves')
         .select('challenge_id, points_awarded')
         .eq('user_id', currentUser.id);
 
-      if (error) {
+      if (!dbError && Array.isArray(dbSolves)) {
+        const dbSolvedIds = dbSolves.map((s) => s.challenge_id);
+        setSolved(dbSolvedIds);
+        try {
+          localStorage.setItem(userKey, JSON.stringify(dbSolvedIds));
+        } catch {}
         return;
       }
+    } catch {
+      // Supabase table not available
+    }
 
-      if (solves && solves.length > 0) {
-        const dbSolvedIds = solves.map(s => s.challenge_id);
-        setSolved((prev) => {
-          const merged = Array.from(new Set([...prev, ...dbSolvedIds]));
+    // 2. Fallback to /api/solves endpoint
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`/api/solves?userId=${encodeURIComponent(currentUser.id)}`, { headers });
+      if (res.ok) {
+        const body = await res.json();
+        if (Array.isArray(body?.solves)) {
+          const apiSolvedIds = body.solves.map((s) => s.challenge_id || s.challengeId);
+          setSolved(apiSolvedIds);
           try {
-            localStorage.setItem("ltcoe_solved", JSON.stringify(merged));
+            localStorage.setItem(userKey, JSON.stringify(apiSolvedIds));
           } catch {}
-          return merged;
-        });
+          return;
+        }
       }
     } catch {
-      // Supabase loadUserData fallback
+      // API error fallback
     }
+
+    // 3. User-scoped cache fallback (if offline)
+    try {
+      const cached = localStorage.getItem(userKey);
+      if (cached) {
+        setSolved(JSON.parse(cached));
+        return;
+      }
+    } catch {}
+
+    // Default: new user has 0 solves
+    setSolved([]);
   }
 
   const markSolved = async (id) => {
     setSolved((prev) => {
       const next = prev.includes(id) ? prev : [...prev, id];
-      try {
-        localStorage.setItem("ltcoe_solved", JSON.stringify(next));
-      } catch {}
+      if (user?.id) {
+        try {
+          localStorage.setItem(`ltcoe_solved_${user.id}`, JSON.stringify(next));
+        } catch {}
+      } else {
+        try {
+          localStorage.setItem("ltcoe_guest_solved", JSON.stringify(next));
+        } catch {}
+      }
       return next;
     });
     if (user) {

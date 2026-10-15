@@ -43,14 +43,20 @@ function saveLocalSolve(solve) {
       fs.mkdirSync(dir, { recursive: true });
     }
     const solves = getLocalSolves();
-    const alreadySolved = solves.some(
+    const existingIndex = solves.findIndex(
       (s) => s.userId === solve.userId && s.challengeId === solve.challengeId
     );
-    if (!alreadySolved) {
+    if (existingIndex === -1) {
       solves.push(solve);
       fs.writeFileSync(SOLVES_FILE, JSON.stringify(solves, null, 2), "utf8");
+      return true;
+    } else {
+      if (solve.displayName && solves[existingIndex].displayName !== solve.displayName) {
+        solves[existingIndex].displayName = solve.displayName;
+        fs.writeFileSync(SOLVES_FILE, JSON.stringify(solves, null, 2), "utf8");
+      }
+      return false;
     }
-    return !alreadySolved;
   } catch (err) {
     console.error("[solves] Failed to save solve:", err);
     return false;
@@ -203,16 +209,29 @@ export default async function handler(req, res) {
           body.displayName ||
           "Player";
 
-        // Non-blocking Supabase sync if table exists
-        supabase
+        // Ensure profile exists in profiles table if table exists
+        try {
+          await supabase.from("profiles").upsert(
+            {
+              id: user.id,
+              display_name: resolvedDisplayName,
+            },
+            { onConflict: "id" }
+          );
+        } catch {}
+
+        // Persist the solve to Supabase. Await so it completes before the
+        // serverless function returns; ignore duplicate solves (unique key).
+        const { error: insertError } = await supabase
           .from("challenge_solves")
           .insert({
             user_id: user.id,
             challenge_id: body.id,
             points_awarded: POINTS[body.id],
-          })
-          .then(() => {})
-          .catch(() => {});
+          });
+        if (insertError && insertError.code !== "23505") {
+          console.error("[verify] Supabase insert failed:", insertError.message);
+        }
       }
     } catch (dbErr) {
       // Supabase is optional; don't block solve
