@@ -210,6 +210,8 @@ function ChallengesPage({ user, solved, markSolved, onShowAuth }) {
       </main>
       <footer className="wrap foot">
         <p>Flags are case-insensitive. Spaces around the answer are ignored.</p>
+        <br></br>
+        <p>Author by : Aditya Nishad</p>
       </footer>
     </>
   );
